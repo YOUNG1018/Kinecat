@@ -220,3 +220,167 @@ conda activate kinect
 
 > Remember to export the **`LIBFREENECT2_INSTALL_PREFIX`** and **`DYLD_LIBRARY_PATH`** before running Python.
 
+
+
+
+
+
+---
+
+
+Here’s a **copy-pasteable README section** for a clean macOS setup that gets **Ultralytics YOLO + OpenCV + Kinect v2 (libfreenect2/pylibfreenect2)** working in a Conda env, with a webcam fallback.
+
+````markdown
+# Environment Setup (macOS, Conda) — YOLO + Kinect v2 + OpenCV
+
+These steps set up a Python environment that runs Ultralytics YOLO with frames from **Kinect v2** (via `libfreenect2`/`pylibfreenect2`) and falls back to a **webcam** if Kinect isn’t present.
+
+> Tested on macOS with Conda (Python 3.11).  
+> If you only want YOLO + webcam, stop after Step 3.
+
+---
+
+## 0) Prerequisites
+
+Install Xcode command line tools and Homebrew:
+```bash
+xcode-select --install || true
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+````
+
+Install build/runtime dependencies:
+
+```bash
+brew update
+brew install cmake libusb glfw pkg-config ffmpeg git
+```
+
+---
+
+## 1) Create a clean Conda environment
+
+```bash
+# Keep conda-forge consistent and fast
+conda config --set channel_priority strict
+conda config --add channels conda-forge
+
+# New environment (Python 3.11 recommended)
+conda create -n vision python=3.11 -y
+conda activate vision
+
+# Optional (faster solver)
+conda install -n base -c conda-forge mamba -y
+```
+
+---
+
+## 2) Install core Python packages
+
+```bash
+# OpenCV (from conda-forge for correct native deps)
+conda install -y opencv ffmpeg
+
+# Ultralytics from pip (their conda build lags)
+pip install --upgrade pip setuptools wheel
+pip install ultralytics
+```
+
+> **PyTorch note:** Ultralytics installs a suitable PyTorch automatically. On macOS there’s no CUDA; CPU-only is fine by default. If you need to pin PyTorch versions, do it before installing `ultralytics`.
+
+Quick sanity check:
+
+```bash
+python - << 'PY'
+import cv2
+print("OpenCV:", cv2.__version__)
+from ultralytics import YOLO
+print("Ultralytics import OK")
+PY
+```
+
+---
+
+## 3) (Optional) YOLO model file
+
+Ultralytics will auto-download `yolo11n.pt`. If you prefer manual:
+
+```bash
+# Place the model file next to your script
+# (Or just let ultralytics download on first run)
+```
+
+---
+
+## 4) Install libfreenect2 (Kinect v2 driver)
+
+> **Only needed if you will use Kinect v2.**
+
+Build and install to a user prefix (easier to manage):
+
+```bash
+git clone https://github.com/OpenKinect/libfreenect2.git
+cd libfreenect2
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX="$HOME/freenect2"
+make -j"$(sysctl -n hw.logicalcpu)"
+make install
+```
+
+Confirm dylibs exist:
+
+```bash
+ls -l "$HOME/freenect2/lib"/libfreenect2*.dylib
+```
+
+---
+
+## 5) Install pylibfreenect2 (Python bindings)
+
+```bash
+cd ~
+pip uninstall -y pylibfreenect2 || true
+pip install git+https://github.com/r9y9/pylibfreenect2.git
+```
+
+---
+
+## 6) Make sure macOS can find the libfreenect2 dylib
+
+Choose **one** of the options below.
+
+### Option A — Add a Conda activation hook (clean)
+
+```bash
+mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
+cat > "$CONDA_PREFIX/etc/conda/activate.d/freenect2.sh" <<'EOF'
+export DYLD_FALLBACK_LIBRARY_PATH="$HOME/freenect2/lib:${DYLD_FALLBACK_LIBRARY_PATH}"
+export PKG_CONFIG_PATH="$HOME/freenect2/lib/pkgconfig:${PKG_CONFIG_PATH}"
+EOF
+# Re-activate to apply
+conda deactivate && conda activate vision
+```
+
+### Option B — Symlink the dylib into the env (quick)
+
+```bash
+ln -sf "$HOME/freenect2/lib/libfreenect2.0.2.dylib" "$CONDA_PREFIX/lib/libfreenect2.0.2.dylib"
+ln -sf "$HOME/freenect2/lib/libfreenect2.dylib"      "$CONDA_PREFIX/lib/libfreenect2.dylib"
+```
+
+---
+
+## 7) Verify Kinect detection (optional)
+
+Plug in Kinect v2 and run:
+
+```bash
+python - << 'PY'
+from pylibfreenect2 import Freenect2
+fn = Freenect2()
+print("Devices found:", fn.enumerateDevices())
+if fn.enumerateDevices() > 0:
+    print("Serial 0:", fn.getDeviceSerialNumber(0))
+PY
+```
+
+If you see a nonzero device count and a serial number, libfreenect2 is good.
